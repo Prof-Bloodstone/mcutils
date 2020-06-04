@@ -1,28 +1,31 @@
 plugins {
-    id 'java'
-    id 'org.jetbrains.kotlin.jvm' version '1.3.72'
-    id 'com.diffplug.gradle.spotless' version '3.29.0'
-    id 'maven-publish'
-    id 'signing'
+  id 'java'
+  id 'org.jetbrains.kotlin.jvm' version '1.3.72'
+  id 'org.jetbrains.dokka' version '0.10.1'
+  id 'com.diffplug.gradle.spotless' version '3.29.0'
+  id 'maven-publish'
+  id 'signing'
 }
 
 def artifactId = 'mcutils'
 group "dev.bloodstone"
-version '0.0.1-SNAPSHOT'
+version '0.0.1'
 def mcVersion = '1.15.2-R0.1-SNAPSHOT'
 
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
 repositories {
-    mavenCentral()
-    maven { url "https://hub.spigotmc.org/nexus/content/repositories/snapshots/" }
-    maven { url "https://oss.sonatype.org/content/repositories/public/" }
+  mavenCentral()
+  maven { url "https://hub.spigotmc.org/nexus/content/repositories/snapshots/" }
+  maven { url "https://oss.sonatype.org/content/repositories/public/" }
+  maven { url 'https://dl.bintray.com/kotlin/dokka' }
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib"
-    compileOnly group: 'org.spigotmc', name: 'spigot-api', version: mcVersion
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+  implementation "org.jetbrains.kotlin:kotlin-stdlib"
+  implementation group: 'org.spigotmc', name: 'spigot-api', version: mcVersion
+  testCompile group: 'junit', name: 'junit', version: '4.12'
 }
-
 
 spotless {
   format 'misc', {
@@ -40,7 +43,7 @@ compileKotlin {
   kotlinOptions.jvmTarget = "1.8"
 }
 compileTestKotlin {
-    kotlinOptions.jvmTarget = "1.8"
+  kotlinOptions.jvmTarget = "1.8"
 }
 
 sourceCompatibility = 1.8
@@ -56,9 +59,33 @@ test {
   useJUnitPlatform()
 }
 
-task javadocJar(type: Jar) {
+def dokkaConfig = {
+  configuration {
+    externalDocumentationLink {
+      // Dokka gets 403 - probably CloudFlare drops due to UserAgent not being set
+      // url = new URL('https://papermc.io/javadocs/paper/1.15')
+      url = new URL('https://hub.spigotmc.org/javadocs/spigot/')
+      packageListUrl = new URL("${url}/package-list")
+    }
+  }
+}
+
+dokka {
+  outputFormat = 'html'
+  outputDirectory = "$buildDir/dokka"
+  with dokkaConfig
+}
+
+task dokkaJavadoc(type: org.jetbrains.dokka.gradle.DokkaTask) {
+  outputFormat = 'javadoc'
+  outputDirectory = javadoc.destinationDir
+  //inputs.dir 'src/main/kotlin'
+  with dokkaConfig
+}
+
+task javadocJar(type: Jar, dependsOn: dokkaJavadoc) {
   classifier 'javadoc'
-  from javadoc
+  from javadoc.destinationDir
 }
 
 task sourcesJar(type: Jar) {
@@ -69,11 +96,6 @@ task sourcesJar(type: Jar) {
 artifacts {
   archives javadocJar
   archives sourcesJar
-}
-
-signing {
-  required { !project.version.endsWith('-SNAPSHOT') && gradle.taskGraph.hasTask(':uploadArchives') && project.hasProperty('signing.keyId') }
-  sign configurations.archives
 }
 
 publishing {
@@ -116,18 +138,27 @@ publishing {
     }
   }
   repositories {
-    if(project.hasProperty('sonatypeUsername') && project.hasProperty('sonatypePassword')) {
-      mavenSonatype {
-        beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
-
-        repository(url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/') {
-          authentication(userName: sonatypeUsername, password: sonatypePassword)
-        }
-
-        snapshotRepository(url: 'https://oss.sonatype.org/content/repositories/snapshots/') {
-          authentication(userName: sonatypeUsername, password: sonatypePassword)
+    if(project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
+      maven {
+        name = "ossrh"
+        def releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+        def snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+        url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+        credentials {
+          username = ossrhUsername
+          password = ossrhPassword
         }
       }
     }
   }
 }
+
+signing {
+  required { isReleaseVersion && gradle.taskGraph.hasTask("publishMavenJavaPublicationToOssrhRepository") }
+  sign publishing.publications.mavenJava
+}
+
+tasks.withType(Sign) {
+  onlyIf { !project.version.endsWith('-SNAPSHOT') }
+}
+
