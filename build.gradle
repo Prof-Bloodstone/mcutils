@@ -9,7 +9,7 @@ plugins {
 
 def artifactId = 'mcutils'
 group "dev.bloodstone"
-version '0.0.1'
+version '0.0.2-SNAPSHOT'
 def mcVersion = '1.15.2-R0.1-SNAPSHOT'
 
 ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
